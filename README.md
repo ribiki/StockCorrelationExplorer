@@ -88,16 +88,15 @@ cd StockCorrelationExplorer
 python -m venv .venv        # create virtual env
 source .venv/bin/activate   # Windows: .venv\Scripts\activate
 
-# install deps (pin NumPy for Numba compatibility)
+## install requirements (Pin NumPy for Numba compatibility)
 pip install -r requirements.txt
-# or explicit:
+## Please note:
 pip install 'numpy<2.3' pandas numba pyarrow streamlit tqdm
 
 
 ## 5 Running the full pipeline
 
-1. **Drop your ZIP(s)** into `data/raw/` – for example:
-
+1. Drop your ZIP(s)** into `data/raw/` – for example:
 
 Each CSV inside the archive must contain these three columns  
 (one trading-day file per CSV):
@@ -112,7 +111,6 @@ BBB,2024-01-02,20.11
 python run.py
 
 The script will:
-
 1. Extract & clean the raw files → write.
 2. Save price_matrix_YYYYMMDD_YYYYMMDD.parquet to data/processed/.
 3. Compute rolling correlations using the window length defined by CONFIG.CORR_WINDOW (default 20 trading days).
@@ -120,7 +118,7 @@ The script will:
 6. Explore correlations interactively in your browser.
 
 
-## Configuration
+## 6 Configuration
 All configs live in utils/config.py.
 ```text
 MAX_STOCK_MISSING_PCT = 0.35         # drop ticker if >35 % still NaN
@@ -130,7 +128,7 @@ RAW_ZIP                = Path("data/raw/stock_data.zip")
 ```
 
 
-## Running the tests
+## 7 Running the tests
 python -m unittest discover -s tests -v
 This command covers loader shape/gap-fill logic, sparse-ticker handling, error paths, and numerical agreement of the correlation engine with a Pandas/NumPy reference.
 
