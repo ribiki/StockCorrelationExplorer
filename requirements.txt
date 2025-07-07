@@ -1,0 +1,8 @@
+# Updated requirements.txt
+numpy==1.26.0
+pandas==2.1.0
+numba==0.58.1
+streamlit==1.28.0
+plotly==5.18.0
+pyarrow==14.0.1
+tqdm==4.66.1
