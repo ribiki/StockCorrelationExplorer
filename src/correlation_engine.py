@@ -120,6 +120,10 @@ class CorrelationEngine:
 
     def update(self, daily_returns: np.ndarray) -> None:
         """Add one new vector of *daily* returns (float32, length = num_tickers)."""
+
+        if np.isnan(daily_returns).any():
+            return
+
         if not hasattr(self, "_buffer"):
             raise RuntimeError("Engine opened in read‑only mode; cannot call update().")
 
@@ -159,11 +163,15 @@ class CorrelationEngine:
 
         start = self._data_offset + day_index * self.num_pairs * self._ITEM_BYTES
         buffer = self._mmap[start : start + self.num_pairs * self._ITEM_BYTES]
-        triu_vals = np.frombuffer(buffer, dtype=np.float16).astype(np.float32)
 
-        mat = np.eye(self.num_tickers, dtype=np.float32)
+        triu_vals = np.frombuffer(buffer, dtype=np.float16)
+        if as_float32:
+            triu_vals = triu_vals.astype(np.float32)
+
+        diag_dtype = np.float32 if as_float32 else np.float16
+        mat = np.eye(self.num_tickers, dtype=diag_dtype)
         mat[np.triu_indices(self.num_tickers, k=1)] = triu_vals
-        return mat + mat.T - np.eye(self.num_tickers, dtype=np.float32)
+        return mat + mat.T - np.eye(self.num_tickers, dtype=diag_dtype)
 
     def get_pair_history(self, i: int, j: int) -> np.ndarray:
         """Rolling‑window correlation series for the ticker pair *(i, j)* (float32)."""

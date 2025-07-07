@@ -14,6 +14,7 @@ from typing import Iterable, List
 import numpy as np
 import pandas as pd
 from tqdm import tqdm
+import pandas_market_calendars as mcal
 
 from utils.config import CONFIG
 
@@ -81,28 +82,37 @@ def _read_csv_files(csv_files: Iterable[Path]) -> pd.DataFrame:
 
 
 def _pivot_price_matrix(raw: pd.DataFrame) -> pd.DataFrame:
-    """Convert *tidy* frame into a [date × ticker] price matrix."""
+    """Convert tidy frame into a [date × ticker] price matrix,
+    re‑index to a full NYSE calendar and *gap‑limited* fill.
+
+    Long gaps (>=4 trading days) remain NaN so they can later be skipped by the
+    correlation engine.
+    """
     matrix = (
         raw.pivot_table(index="date", columns="ticker", values="price", aggfunc="last")
         .sort_index()
         .astype(np.float32)
     )
 
-    # forward/back‑fill small gaps
-    matrix = matrix.ffill().bfill()
+    #  1)  use trading calendar
+    cal = mcal.get_calendar(CONFIG.MARKET_CALENDAR)
+    full_days = cal.schedule(
+        start=matrix.index.min(),
+        end=matrix.index.max()
+    ).index
+    matrix = matrix.reindex(full_days)
 
-    # drop hopeless tickers with too many NaNs
-    missing = matrix.isna().mean()
-    mask = missing > CONFIG.MAX_STOCK_MISSING_PCT
-    if mask.any():
-        n_drop = int(mask.sum())
-        print(
-            f"🧹 Dropping {n_drop} tickers with >"
-            f" {CONFIG.MAX_STOCK_MISSING_PCT:.0%} missing data"
-        )
-        matrix = matrix.loc[:, ~mask]
+    # 2)  only fill <= 3 consecutive sessions
+    matrix = matrix.ffill(limit=3).bfill(limit=3)
+
+    # 3)  drop inactive tickers
+    too_sparse = matrix.isna().mean() > CONFIG.MAX_STOCK_MISSING_PCT
+    if too_sparse.any():
+        n = int(too_sparse.sum())
+        print(f"🧹 Dropping {n} sparse tickers (> {CONFIG.MAX_STOCK_MISSING_PCT:.0%} NaN)")
+        matrix = matrix.loc[:, ~too_sparse]
+
     return matrix
-
 
 def _save_to_parquet(df: pd.DataFrame) -> Path:
     out_dir = Path(CONFIG.PROCESSED_DATA_DIR)
