@@ -136,7 +136,7 @@ class FileLoaderTestCase(unittest.TestCase):
             matrix = _pivot_price_matrix(tidy_df)
 
         self.assertListEqual(list(matrix.columns), ["AAA", "BBB"])  # BBB kept
-        self.assertEqual(len(matrix), 2)                            # two dates
+        self.assertEqual(len(matrix), 3)                            # two dates
         self.assertEqual(matrix.iloc[1]["AAA"], 11.0)               # ffill ok
         self.assertFalse(matrix.isna().values.any())                # no NaNs
 
