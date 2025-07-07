@@ -40,12 +40,8 @@ def load_price_data() -> Tuple[pd.DataFrame, list[str]]:
 
     if not frames:
         return pd.DataFrame(), []
-
-    price_df = (
-        pd.concat(frames)
-        .sort_index()
-        .loc[~pd.concat(frames).index.duplicated(keep="last")]
-    )
+    price_df = pd.concat(frames).sort_index()
+    price_df = price_df.loc[~price_df.index.duplicated(keep="last")]
 
     return price_df, price_df.columns.tolist()
 
@@ -102,7 +98,7 @@ def main() -> None:
             value=corr_dates[-1],
             format_func=lambda d: d.strftime("%Y‑%m‑%d"),
         )
-        day_idx = corr_dates.get_loc(chosen_date)
+        day_idx = corr_dates.get_indexer([chosen_date])[0]
 
     with c2:
         ref_ticker = st.selectbox("Reference ticker:", tickers, index=0)
@@ -161,11 +157,18 @@ def main() -> None:
         else:
             with st.spinner("Loading pair history…"):
                 i, j = tickers.index(tkr1), tickers.index(tkr2)
-                hist = pd.Series(
-                    engine.get_pair_history(i, j),
-                    index=corr_dates,
-                    name="ρ(20‑day)"
-                )
+                hist_arr = engine.get_pair_history(i, j)
+                if hist_arr.size == len(corr_dates):
+                    date_idx = corr_dates  # perfect match
+                elif hist_arr.size < len(corr_dates):
+                    # mmap is shorter - take the last N dates so shapes match
+                    date_idx = corr_dates[-hist_arr.size:]
+                else:
+                    # mmap is longer - fallback to a trimmed array (should not happen)
+                    hist_arr = hist_arr[-len(corr_dates):]
+                    date_idx = corr_dates
+
+                hist = pd.Series(hist_arr, index=date_idx, name="ρ (20‑day)")
 
                 rng_mask = (hist.index >= pd.Timestamp(start_dt)) & (hist.index <= pd.Timestamp(end_dt))
                 sub = hist.loc[rng_mask]
