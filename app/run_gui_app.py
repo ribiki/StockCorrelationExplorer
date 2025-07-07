@@ -79,6 +79,19 @@ def main() -> None:
     returns_index = clean_df.index[1:]                              # after pct_change
     corr_dates = returns_index[CONFIG.CORR_WINDOW - 1:]             # first valid window
 
+    if len(corr_dates) > engine.num_corr_days:
+        st.warning(
+            f"Detected {len(corr_dates) - engine.num_corr_days} extra "
+            "calendar dates without correlations. "
+            "Did you rebuild the price matrix but not corr_mmap.bin?"
+        )
+        corr_dates = corr_dates[-engine.num_corr_days:]
+    elif len(corr_dates) < engine.num_corr_days:
+        st.warning(
+            "The mmap contains more windows than the current price matrix. "
+            "Only the first matching windows will be shown."
+        )
+
     st.subheader("Data Information")
     st.info(f"**Loaded price range:** {price_df.index.min().date()} ➜ {price_df.index.max().date()}")
     st.info(f"**Correlations available for:** {corr_dates[0].date()} ➜ {corr_dates[-1].date()}")
