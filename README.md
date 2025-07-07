@@ -12,9 +12,12 @@
    b. Memory-mapped storage for instant access to years of data.
 4. Interactive Explorer GUI
    a. Daily correlation matrices
+   <img width="1494" alt="image" src="https://github.com/user-attachments/assets/3e53bb91-3bf4-4cac-9566-2840dab05805" />
+
    b. Pair-stock correlation history
-   c. Price performance metrics Optimized Architecture
-5. Faster implementations with memory efficiencies
+   <img width="1494" alt="image" src="https://github.com/user-attachments/assets/4c8af8ae-e051-4249-8e35-257b32c4d313" />
+
+6. Faster implementations with memory efficiencies
 
 ## Project layout
 
