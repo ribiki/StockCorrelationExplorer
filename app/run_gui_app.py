@@ -1,214 +1,209 @@
 import sys
-import traceback
 from pathlib import Path
+from typing import Tuple
+
 import numpy as np
 import pandas as pd
+import plotly.express as px
 import streamlit as st
 
 project_root = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(project_root))
 from utils.config import CONFIG
+from src.correlation_engine import CorrelationEngine
 
 
-@st.cache_resource(ttl=3600)  # Refresh cache hourly
-def load_data():
-    try:
-        proc_dir = Path(CONFIG.PROCESSED_DATA_DIR)
-        if not proc_dir.is_absolute():
-            proc_dir = project_root / proc_dir
-
-        proc_dir.mkdir(parents=True, exist_ok=True)
-        price_files = list(proc_dir.glob("price_matrix_*.parquet"))
-
-        if not price_files:
-            st.error("❌ No price data files found")
-            return None, None, None, None
-
-        dfs = []
-        for f in price_files:
-            try:
-                df = pd.read_parquet(f)
-                if "Date" in df.columns:
-                    df = df.rename(columns={"Date": "date"})
-                if "date" not in df.columns:
-                    st.error(f"⚠️ File {f.name} missing 'date' column")
-                    continue
-                df = df.set_index("date")
-                dfs.append(df)
-            except Exception as e:
-                st.error(f"⚠️ Error loading {f.name}: {e}")
-
-        if not dfs:
-            return None, None, None, None
-
-        price_df = pd.concat(dfs).sort_index()
-        price_df = price_df[~price_df.index.duplicated(keep='last')]
-
-        min_date = price_df.index.min()
-        max_date = price_df.index.max()
-        tickers = price_df.columns.tolist()
-
-        return price_df, tickers, min_date, max_date
-    except Exception as e:
-        st.error(f"⚠️ Unexpected error: {str(e)}")
-        return None, None, None, None
-
-
-def calculate_correlation(price_df, t1, t2, start_date, end_date):
+@st.cache_resource(ttl=3600)
+def load_price_data() -> Tuple[pd.DataFrame, list[str]]:
     """
-    Calculate correlation and statistics for two tickers given a date range
+    Return
+    ------
+    price_df: pd.DataFrame(NaNs value will remain only for long gaps, e.g. 20200909 - 20201231)
     """
-    try:
-        start_date = pd.Timestamp(start_date)
-        end_date = pd.Timestamp(end_date)
+    proc_dir = (project_root / CONFIG.PROCESSED_DATA_DIR).resolve()
+    parquet_files = sorted(proc_dir.glob("price_matrix_*.parquet"))
 
-        # Validate tickers exist in data
-        if t1 not in price_df.columns:
-            st.error(f"⚠️ Ticker '{t1}' not found in price data columns")
-            return None, None, None, None
-        if t2 not in price_df.columns:
-            st.error(f"⚠️ Ticker '{t2}' not found in price data columns")
-            return None, None, None, None
+    if not parquet_files:
+        st.error("❌ No Parquet price files found in data/processed")
+        return pd.DataFrame(), []
 
-        # Filter data for selected date range
-        mask = (price_df.index >= start_date) & (price_df.index <= end_date)
-        period_df = price_df.loc[mask, [t1, t2]]
+    # concatenate all price matrices found
+    frames = []
+    for fp in parquet_files:
+        df = pd.read_parquet(fp)
+        if "Date" in df.columns:
+            df = df.rename(columns={"Date": "date"})
+        if "date" not in df.columns:
+            st.warning(f"{fp.name}: no 'date' column")
+            continue
+        frames.append(df.set_index("date"))
 
-        st.info(f"Date range selected: {start_date.date()} to {end_date.date()}")
-        st.info(f"Total days in range: {len(period_df)}")
-        st.info(f"Days with {t1} data: {period_df[t1].notna().sum()}")
-        st.info(f"Days with {t2} data: {period_df[t2].notna().sum()}")
+    if not frames:
+        return pd.DataFrame(), []
 
-        # Drop rows with missing values
-        period_df = period_df.dropna()
+    price_df = (
+        pd.concat(frames)
+        .sort_index()
+        .loc[~pd.concat(frames).index.duplicated(keep="last")]
+    )
 
-        if len(period_df) == 0:
-            st.error("❌ No overlapping data points for both tickers in selected date range")
-            return None, None, None, None
+    return price_df, price_df.columns.tolist()
 
-        if len(period_df) < 10:
-            st.warning(f"⚠️ Only {len(period_df)} common trading days available. Minimum 10 required.")
 
-            # Show missing dates analysis
-            missing_dates = period_df.index.to_series().diff().dt.days
-            gaps = missing_dates[missing_dates > 1]
-            if not gaps.empty:
-                st.warning(f"Data gaps detected: {gaps.value_counts().to_dict()}")
+# ────────────────────────────────────────#
+# 2.  Memory‑mapped rolling correlations  #
+# ────────────────────────────────────────#
+# This is cached with no expriry
+@st.cache_resource
+def load_corr_engine() -> CorrelationEngine:
+    path = Path(CONFIG.PROCESSED_DATA_DIR) / "corr_mmap.bin"
+    return CorrelationEngine(path)
 
-            return None, None, None, None
 
-        returns = period_df.pct_change().dropna()
-        correlation = returns.corr().iloc[0, 1]
-
-        # Calculate statistics for each ticker
-        stats = {}
-        for ticker in [t1, t2]:
-            prices = period_df[ticker]
-
-            total_return = (prices.iloc[-1] / prices.iloc[0] - 1) * 100
-
-            daily_std = returns[ticker].std() * 100
-            monthly_std = daily_std * np.sqrt(21)
-            annualized_std = daily_std * np.sqrt(252)
-
-            stats[ticker] = {
-                "Total Return": total_return,
-                "Daily Std Dev": daily_std,
-                "Monthly Std Dev": monthly_std,
-                "Annualized Std Dev": annualized_std
-            }
-
-        return correlation, stats, period_df.index[0], period_df.index[-1]
-
-    except Exception as e:
-        st.error(f"⚠️ Error in correlation calculation: {str(e)}")
-        st.error(traceback.format_exc())
-        return None, None, None, None
-
-def main():
+# ───────────────────── #
+# 3.  Streamlit GUI     #
+# ───────────────────── #
+def main() -> None:
     st.set_page_config(layout="wide")
     st.title("🔗 Stock Correlation Explorer")
 
-    price_df, tickers, min_date, max_date = load_data()
-    if price_df is None:
+    # ---------- load data ---------------
+    price_df, tickers = load_price_data()
+    if price_df.empty:
         return
 
+    engine = load_corr_engine()
+
+    # rebuild the calendar the pipeline used (rows without NaN)
+    clean_df = price_df.dropna(how="any")
+    if clean_df.empty:
+        st.error("All rows contain at least one NaN value.")
+        return
+
+    returns_index = clean_df.index[1:]                              # after pct_change
+    corr_dates = returns_index[CONFIG.CORR_WINDOW - 1:]             # first valid window
+
     st.subheader("Data Information")
-    st.info(f"**Loaded Data Range:** {min_date.strftime('%Y-%m-%d')} to {max_date.strftime('%Y-%m-%d')}")
-    st.info(f"**Tickers Available:** {len(tickers)} symbols")
+    st.info(f"**Loaded price range:** {price_df.index.min().date()} ➜ {price_df.index.max().date()}")
+    st.info(f"**Correlations available for:** {corr_dates[0].date()} ➜ {corr_dates[-1].date()}")
+    st.info(f"**Tickers:** {len(tickers)} symbols")
 
-    st.subheader("Analysis Period")
-    col1, col2 = st.columns(2)
-    with col1:
-        start_date = st.date_input(
-            "Start Date:",
-            value=min_date,
-            min_value=min_date,
-            max_value=max_date
+    # ==========================================#
+    # SECTION A · Daily correlation explorer    #
+    # ==========================================#
+    st.markdown("---")
+    st.subheader("🔍 Explore correlations on **a trading day**")
+
+    c1, c2 = st.columns([2, 1])
+    with c1:
+        chosen_date = st.select_slider(
+            "Trading day:",
+            options=list(corr_dates),
+            value=corr_dates[-1],
+            format_func=lambda d: d.strftime("%Y‑%m‑%d"),
         )
-    with col2:
-        end_date = st.date_input(
-            "End Date:",
-            value=max_date,
-            min_value=start_date,
-            max_value=max_date
-        )
+        day_idx = corr_dates.get_loc(chosen_date)
 
-    st.subheader("Ticker Selection")
-    t1, t2 = st.columns(2)
-    with t1:
-        ticker1 = st.selectbox("Select First Ticker:", tickers, index=0)
-    with t2:
-        default_idx = 1 if len(tickers) > 1 and tickers[1] != ticker1 else min(1, len(tickers) - 1)
-        ticker2 = st.selectbox("Select Second Ticker:", tickers, index=default_idx)
+    with c2:
+        ref_ticker = st.selectbox("Reference ticker:", tickers, index=0)
 
-    if st.button("Calculate Correlation", type="primary"):
-        if ticker1 == ticker2:
-            st.error("❌ Please select two different tickers")
-            return
+    if st.button("Show daily correlations", type="primary"):
+        with st.spinner("Fetching correlation matrix…"):
+            mat = engine.get_day_matrix(day_idx)
+            ref_vec = pd.Series(mat[tickers.index(ref_ticker)], index=tickers)
 
-        with st.spinner("Calculating..."):
-            correlation, stats, actual_start, actual_end = calculate_correlation(
-                price_df, ticker1, ticker2, start_date, end_date
+            # top / bottom 10 correlations
+            top10 = ref_vec.drop(ref_ticker).nlargest(10).rename("ρ(+)")
+            bot10 = ref_vec.nsmallest(10).rename("ρ(–)")
+
+            st.write(f"### {ref_ticker} – {chosen_date.date()}")
+            st.write("Top 10 positively / negatively correlated tickers")
+
+            tbl = pd.concat([top10, bot10], axis=1).style.format("{:.3f}")
+            st.dataframe(tbl, height=320)
+
+            # quick 50×50 heat‑map of strongest absolute correlations
+            top50 = ref_vec.abs().nlargest(50).index
+            heat_df = pd.DataFrame(mat, index=tickers, columns=tickers).loc[top50, top50]
+            fig = px.imshow(
+                heat_df,
+                title=f"Top‑50 correlation sub‑matrix on {chosen_date.strftime('%Y‑%m‑%d')}",
+                aspect="auto",
             )
+            st.plotly_chart(fig, use_container_width=True)
 
-            if correlation is None:
-                return
+    # ====================================#
+    # SECTION B · Pair history explorer   #
+    # ====================================#
+    st.markdown("---")
+    st.subheader("📈 Correlation history for *two* tickers")
 
-            # Display results
-            st.success(f"Correlation Coefficient: **{correlation:.4f}**")
-            st.caption(f"Period: {actual_start.strftime('%Y-%m-%d')} to {actual_end.strftime('%Y-%m-%d')}")
+    p1, p2 = st.columns(2)
+    with p1:
+        tkr1 = st.selectbox("Ticker A:", tickers, index=0, key="tkr1")
+    with p2:
+        default_idx = 1 if len(tickers) > 1 and tickers[1] != tkr1 else min(1, len(tickers) - 1)
+        tkr2 = st.selectbox("Ticker B:", tickers, index=default_idx, key="tkr2")
 
-            # Create metrics columns
-            col1, col2 = st.columns(2)
-            metric_data = []
-            for i, ticker in enumerate([ticker1, ticker2]):
-                col = col1 if i == 0 else col2
-                with col:
-                    st.subheader(f"{ticker} Performance")
-                    if ticker in stats:
-                        st.metric("Total Return", f"{stats[ticker]['Total Return']:.2f}%")
-                        st.metric("Annual Volatility", f"{stats[ticker]['Annualized Std Dev']:.2f}%")
-                    else:
-                        st.warning("No data available")
+    d1, d2 = st.columns(2)
+    with d1:
+        start_dt = st.date_input("Start date:", value=corr_dates[0].date(),
+                                 min_value=corr_dates[0].date(),
+                                 max_value=corr_dates[-1].date())
+    with d2:
+        end_dt = st.date_input("End date:", value=corr_dates[-1].date(),
+                               min_value=start_dt,
+                               max_value=corr_dates[-1].date())
 
-                    # Add to table data
-                    if ticker in stats:
-                        metric_data.append({
-                            "Ticker": ticker,
-                            "Correlation": correlation,
-                            "Total Return (%)": stats[ticker]["Total Return"],
-                            "Annual Volatility (%)": stats[ticker]["Annualized Std Dev"]
-                        })
+    if st.button("Show history", type="primary", key="history_btn"):
+        if tkr1 == tkr2:
+            st.error("❌ Please choose *different* tickers")
+        else:
+            with st.spinner("Loading pair history…"):
+                i, j = tickers.index(tkr1), tickers.index(tkr2)
+                hist = pd.Series(
+                    engine.get_pair_history(i, j),
+                    index=corr_dates,
+                    name="ρ(20‑day)"
+                )
 
-            if metric_data:
-                st.subheader("Performance Summary")
-                df = pd.DataFrame(metric_data)
-                st.dataframe(df.style.format({
-                    "Correlation": "{:.4f}",
-                    "Total Return (%)": "{:.2f}%",
-                    "Annual Volatility (%)": "{:.2f}%"
-                }))
+                rng_mask = (hist.index >= pd.Timestamp(start_dt)) & (hist.index <= pd.Timestamp(end_dt))
+                sub = hist.loc[rng_mask]
+
+                if sub.empty:
+                    st.warning("No correlation values in the selected date range "
+                               "(likely because some days had missing prices).")
+                else:
+                    latest = sub.iloc[-1]
+                    st.success(f"Latest correlation ({sub.index[-1].date()}): **{latest:.4f}**")
+                    st.line_chart(sub)
+
+                    # quick stats
+                    st.caption(f"Mean ρ: {sub.mean():.4f}·Stddev: {sub.std():.4f} "
+                               f"·Min: {sub.min():.4f}·Max: {sub.max():.4f}")
+
+    # ============================================#
+    # SECTION C · Price‑based performance metrics #
+    # ============================================#
+    st.markdown("---")
+    st.subheader("🚀 Price‑performance snapshot")
+
+    if st.checkbox("Show basic return & volatility metrics"):
+        # dataframe has short gap NaNs only
+        def perf_stats(tkr: str):
+            prices = price_df[tkr].dropna()
+            rets = prices.pct_change().dropna()
+            return {
+                "Total return%": (prices.iloc[-1] / prices.iloc[0] - 1) * 100,
+                "Ann. vol%": rets.std() * np.sqrt(252) * 100,
+                "Obs. days": len(prices)
+            }
+
+        data = pd.DataFrame({t: perf_stats(t) for t in [tkr1, tkr2]}).T
+        st.dataframe(data.style.format("{:.2f}"))
+
+    st.caption("Streamlit demo – correlations pre‑computed with a rolling window"
+               f"of {CONFIG.CORR_WINDOW} trading days.")
 
 
 if __name__ == "__main__":
