@@ -10,7 +10,8 @@
 2. High-Performance Correlation Engine
    a. Incremental sliding window updates (not recomputing from scratch).
    b. Memory-mapped storage for instant access to years of data.
-4. Interactive Explorer GUI
+4. Interactive Explorer GUI:
+   
    a. Daily correlation matrices
    <img width="1494" alt="image" src="https://github.com/user-attachments/assets/3e53bb91-3bf4-4cac-9566-2840dab05805" />
 
