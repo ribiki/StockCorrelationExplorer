@@ -28,12 +28,13 @@ logger = logging.getLogger(__name__)
 # helper functions       #
 # ───────────────────────#
 
-def _compute_returns(price_df: pd.DataFrame) -> np.ndarray:
-    """Return *daily* percentage returns as a float32 NumPy array.
-
-    The first row (NaNs after pct_change) is dropped.
+def _compute_returns(price_df: pd.DataFrame) -> tuple[np.ndarray, pd.DatetimeIndex]:
     """
-    return price_df.pct_change().iloc[1:].values.astype(np.float32)
+    1.  Drop any trading day that still has a NaN for *any* ticker.
+    2.  Calculate % returns (the first row per ticker is NaN and is dropped)
+    """
+    clean = price_df.dropna(how="any")
+    return clean.pct_change().iloc[1:].values.astype(np.float32), clean.index[1:]
 
 
 def _stream_correlations(returns: np.ndarray, mmap_path: Path) -> None:
@@ -76,7 +77,7 @@ def main() -> None:
         sys.exit("Not enough rows to compute rolling correlations")
 
     # 2. daily returns -------------------
-    returns = _compute_returns(price_df)
+    returns, valid_dates = _compute_returns(price_df)
     logger.info("computed %s daily‑return rows", len(returns))
 
     # 3. rolling correlations -------------
