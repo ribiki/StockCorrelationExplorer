@@ -97,8 +97,8 @@ def _pivot_price_matrix(raw: pd.DataFrame) -> pd.DataFrame:
     #  1)  use trading calendar
     cal = mcal.get_calendar(CONFIG.MARKET_CALENDAR)
     full_days = cal.schedule(
-        start=matrix.index.min(),
-        end=matrix.index.max()
+        start_date=matrix.index.min(),
+        end_date=matrix.index.max()
     ).index
     matrix = matrix.reindex(full_days)
 
@@ -109,7 +109,7 @@ def _pivot_price_matrix(raw: pd.DataFrame) -> pd.DataFrame:
     too_sparse = matrix.isna().mean() > CONFIG.MAX_STOCK_MISSING_PCT
     if too_sparse.any():
         n = int(too_sparse.sum())
-        print(f"🧹 Dropping {n} sparse tickers (> {CONFIG.MAX_STOCK_MISSING_PCT:.0%} NaN)")
+        print(f"Dropping {n} tickers (> {CONFIG.MAX_STOCK_MISSING_PCT:.0%} NaN)")
         matrix = matrix.loc[:, ~too_sparse]
 
     return matrix
@@ -137,7 +137,7 @@ def build_price_matrix(zip_file_path: str | os.PathLike) -> pd.DataFrame:
     4. Forward/back‑fill, drop sparse tickers    → cleaned matrix
     5. Save as Parquet (for GUI & downstream)    → *data/processed* directory
     """
-    print(f"🏗️  Building price matrix from {zip_file_path}")
+    print(f" Building price matrix from {zip_file_path}")
 
     with tempfile.TemporaryDirectory() as tmp_dir:
         csvs = _unzip_archives(zip_file_path, Path(tmp_dir))
