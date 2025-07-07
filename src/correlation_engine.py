@@ -156,13 +156,26 @@ class CorrelationEngine:
     #  read mode helpers           #
     # ─────────────────────────────#
 
-    def get_day_matrix(self, day_index: int) -> np.ndarray:
-        """Return the full correlation matrix (float32) for *day_index*."""
-        if day_index < 0 or day_index >= self.num_corr_days:
-            return np.eye(self.num_tickers, dtype=np.float32)
+    def get_day_matrix(self, day_index: int, as_float32: bool = True) -> np.ndarray:
+        """
+        Return the full correlation matrix for one window (*day_index*).
 
-        start = self._data_offset + day_index * self.num_pairs * self._ITEM_BYTES
-        buffer = self._mmap[start : start + self.num_pairs * self._ITEM_BYTES]
+        Parameters
+        ----------
+        day_index : int, index into the list of stored windows.
+        as_float32 : bool
+            • True  → up‑cast the stored float16 upper‑triangle to float32
+            • False → keep everything in float16 and halve the RAM footprint.
+        """
+        if day_index < 0 or day_index >= self.num_corr_days:
+            dtype = np.float32 if as_float32 else np.float16
+            return np.eye(self.num_tickers, dtype=dtype)
+
+        start = (
+                self._data_offset
+                + day_index * self.num_pairs * self._ITEM_BYTES
+        )
+        buffer = self._mmap[start: start + self.num_pairs * self._ITEM_BYTES]
 
         triu_vals = np.frombuffer(buffer, dtype=np.float16)
         if as_float32:
@@ -172,6 +185,7 @@ class CorrelationEngine:
         mat = np.eye(self.num_tickers, dtype=diag_dtype)
         mat[np.triu_indices(self.num_tickers, k=1)] = triu_vals
         return mat + mat.T - np.eye(self.num_tickers, dtype=diag_dtype)
+
 
     def get_pair_history(self, i: int, j: int) -> np.ndarray:
         """Rolling‑window correlation series for the ticker pair *(i, j)* (float32)."""
