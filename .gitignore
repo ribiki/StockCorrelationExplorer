@@ -1,0 +1,16 @@
+# --- Python runtime ---
+__pycache__/
+*.py[cod]
+*.pyo
+
+# --- Virtual environments ---
+.venv/
+
+# --- Packaging ---
+dist/
+build/
+*.egg-info/
+
+# --- IDE / OS cruft (optional but handy) ---
+.vscode/
+.DS_Store
